@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>打磚塊遊戲</title>
+    <style>
+         /* 基礎樣式 */
+         #brickContainer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .brick {
+            width: 60px;
+            height: 20px;
+            background-color: #ff6347;
+            position: relative;
+            transition: opacity 0.2s ease-out;
+        }
+
+        /* 爆炸效果 */
+        @keyframes explosion {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.5);
+                opacity: 0.8;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+
+        /* 閃光效果 */
+        .flash {
+            animation: explosion 0.4s ease-out forwards;
+        }
+    
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #0095DD;
+        }
+
+        #difficultySelector, #backgroundSelector {
+            margin-bottom: 20px;
+        }
+
+        .difficulty-btn, .background-btn {
+            padding: 10px 20px;
+            margin: 0 5px;
+            background-color: #0095DD;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .difficulty-btn:hover, .background-btn:hover {
+            background-color: #007bbd;
+        }
+
+        #restartBtn {
+            display: none;
+            padding: 10px 20px;
+            background-color: #ff5722;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        #restartBtn:hover {
+            background-color: #e64a19;
+        }
+
+        .score {
+            font-size: 16px;
+            color: #0095DD;
+        }
+
+        .life {
+            font-size: 16px;
+            color: #ff5722;
+        }
+
+        .game-over {
+            font-size: 24px;
+            color: #ff0000;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<h1>打磚塊遊戲</h1>
+
+<div id="difficultySelector">
+    <button class="difficulty-btn" onclick="setDifficulty('easy')">簡單</button>
+    <button class="difficulty-btn" onclick="setDifficulty('medium')">中等</button>
+    <button class="difficulty-btn" onclick="setDifficulty('hard')">困難</button>
+    <button class="difficulty-btn" onclick="setDifficulty('timeChallenge')">時間挑戰</button> <!-- 新增時間挑戰按鈕 -->
+</div>
+<div id="backgroundSelector">
+    <button class="background-btn" onclick="setBackground('gradient')">漸變背景</button>
+    <button class="background-btn" onclick="setBackground('solid')">單色背景</button>
+    <button class="background-btn" onclick="setBackground('image')">圖片背景</button>
+</div>
+<canvas id="gameCanvas" width="480" height="320" style="display: none;"></canvas>
+<button id="restartBtn">重新開始</button>
+
+<script>
+
+
+
+// 取得canvas元素
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const restartBtn = document.getElementById("restartBtn");
+
+// 擋板的屬性
+const paddleHeight = 10;
+const paddleWidth = 75;
+let paddleX = (canvas.width - paddleWidth) / 2;
+
+// 球的屬性
+let balls = [];
+const ballRadius = 10;
+
+// 磚塊屬性
+const brickRowCount = 3;
+const brickColumnCount = 5;
+const brickWidth = 75;
+const brickHeight = 20;
+const brickPadding = 10;
+const brickOffsetTop = 30;
+const brickOffsetLeft = 30;
+
+// 初始化分數和生命
+let score = 0;
+let lives = 3; // 每关固定3条生命
+let comboCount = 0; // 新增连击计数器
+let lastBreakTime = 0; // 新增上次击破砖块的时间
+const comboTimeLimit = 1000; // 连击时间限制，单位是毫秒
+let jumpHeight = 30; // 擋板跳躍高度
+let jumpDuration = 1000; // 跳躍持續時間（毫秒）
+let jumpCooldown = 2000; // 冷卻時間，單位毫秒
+let lastJumpTime = 0; // 上次跳躍的時間
+let isJumping = false; // 是否正在跳躍
+let jumpDirection = -1; // 跳躍方向：向上為負，向下為正
+
+// 遊戲狀態
+let gameOver = false;
+
+// 設定難度與計時器
+let remainingTime = 30; // 時間挑戰的剩餘時間
+let currentDifficulty = 'easy'; // 預設難度
+let currentBackground = 'gradient'; // 預設背景
+
+// 磚塊數量和擊打次數
+let difficultySettings = {
+    easy: { rows: 3, cols: 5, hits: 1, ballSpeedX: 2, ballSpeedY: 2 },
+    medium: { rows: 3, cols: 5, hits: 2, ballSpeedX: 3, ballSpeedY: 3 },
+    hard: { rows: 3, cols: 5, hits: 3, ballSpeedX: 4, ballSpeedY: 4 },
+    timeChallenge: { rows: 3, cols: 5, hits: 3, ballSpeedX: 4, ballSpeedY: 4 },
+};
+
+// 爆炸效果
+let explosions = []; // 儲存爆炸效果
+const explosionDuration = 500; // 爆炸持續時間
+const explosionSize = 30; // 爆炸大小
+
+// 設定難度
+function setDifficulty(difficulty) {
+    currentDifficulty = difficulty;
+
+    // 重置球的位置和速度
+    balls = [{
+        x: canvas.width / 2,
+        y: canvas.height - 30,
+        dx: difficultySettings[difficulty].ballSpeedX,
+        dy: difficultySettings[difficulty].ballSpeedY
+    }];
+
+    if (difficulty === 'timeChallenge') {
+        remainingTime = 30; // 時間挑戰的初始時間
+    }
+
+    generateBricks();
+    document.getElementById("difficultySelector").style.display = 'none';
+    canvas.style.display = 'block';
+    initializeGame();
+}
+
+// 設定背景
+function setBackground(type) {
+    currentBackground = type;
+}
+
+// 初始化遊戲
+function initializeGame() {
+    paddleX = (canvas.width - paddleWidth) / 2;
+    score = 0;
+    lives = 3;
+
+    restartBtn.style.display = 'none';
+    gameOver = false;
+
+    explosions = []; // 清空爆炸效果
+    generateBricks(); // 確保在初始化時生成磚塊
+    draw();
+}
+
+// 動態生成磚塊函數
+function generateBricks() {
+    bricks = [];
+    for (let c = 0; c < brickColumnCount; c++) {
+        bricks[c] = [];
+        for (let r = 0; r < brickRowCount; r++) {
+            const hitCount = difficultySettings[currentDifficulty].hits;
+            bricks[c][r] = { x: 0, y: 0, status: 1, hitCount: hitCount };
+        }
+    }
+}
+
+// 鍵盤控制
+let rightPressed = false;
+let leftPressed = false;
+
+document.addEventListener("keydown", keyDownHandler, false);
+document.addEventListener("keyup", keyUpHandler, false);
+document.addEventListener("mousemove", mouseMoveHandler, false);
+document.addEventListener("click", jumpHandler, false); // 滑鼠點擊
+document.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.key === "ArrowUp") { // 空格或向上箭頭
+        jumpHandler();
+    }
+});
+restartBtn.addEventListener("click", initializeGame);
+
+// 跳躍處理函數
+function jumpHandler() {
+    if (!isJumping) { // 檢查是否能跳躍
+        isJumping = true; // 設置為正在跳躍
+        jumpStartTime = Date.now(); // 記錄開始時間
+    }
+}
+
+
+function keyDownHandler(e) {
+    if (e.key == "Right" || e.key == "ArrowRight") {
+        rightPressed = true;
+    } else if (e.key == "Left" || e.key == "ArrowLeft") {
+        leftPressed = true;
+    }
+}
+
+function keyUpHandler(e) {
+    if (e.key == "Right" || e.key == "ArrowRight") {
+        rightPressed = false;
+    } else if (e.key == "Left" || e.key == "ArrowLeft") {
+        leftPressed = false;
+    }
+}
+
+function mouseMoveHandler(e) {
+    const relativeX = e.clientX - canvas.getBoundingClientRect().left;
+    if (relativeX > 0 && relativeX < canvas.width) {
+        paddleX = relativeX - paddleWidth / 2;
+    }
+}
+
+// 繪製磚塊
+function drawBricks() {
+    for (let c = 0; c < brickColumnCount; c++) {
+        for (let r = 0; r < brickRowCount; r++) {
+            const b = bricks[c][r];
+            if (b.status == 1) {
+                const brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
+                const brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
+                b.x = brickX;
+                b.y = brickY;
+
+                // 繪製磚塊顏色和擊打次數
+                if (b.hitCount === 1) {
+                    ctx.fillStyle = "#0095DD"; // 1次擊打
+                } else if (b.hitCount === 2) {
+                    ctx.fillStyle = "#ffcc00"; // 2次擊打
+                } else if (b.hitCount === 3) {
+                    ctx.fillStyle = "#ff5722"; // 3次擊打
+                }
+
+                ctx.fillRect(brickX, brickY, brickWidth, brickHeight);
+                ctx.fillStyle = "#fff"; // 設置文字顏色
+                ctx.font = "16px Arial";
+                ctx.fillText(b.hitCount, brickX + brickWidth / 2 - 5, brickY + brickHeight / 2 + 5); // 繪製剩餘擊打次數
+            }
+        }
+    }
+}
+
+// 繪製爆炸效果
+function drawExplosions() {
+    for (let i = explosions.length - 1; i >= 0; i--) {
+        const explosion = explosions[i];
+        ctx.fillStyle = `rgba(255, 255, 0, ${explosion.alpha})`; // 爆炸的顏色
+        ctx.beginPath();
+        ctx.arc(explosion.x, explosion.y, explosion.size, 0, Math.PI * 2);
+        ctx.fill();
+        explosion.alpha -= 0.02; // 逐漸變透明
+        explosion.duration -= 16; // 每幀減少持續時間
+        if (explosion.duration <= 0) {
+            explosions.splice(i, 1); // 移除已過期的爆炸效果
+        }
+    }
+}
+
+// 創建爆炸效果
+function createExplosion(x, y) {
+    explosions.push({ x: x, y: y, alpha: 1, duration: explosionDuration });
+}
+
+
+
+// 繪製球
+function drawBalls() {
+    balls.forEach(ball => {
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#0095DD";
+        ctx.fill();
+        ctx.closePath();
+    });
+}
+
+// 繪製擋板
+function drawPaddle() {
+    ctx.beginPath();
+    ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+    ctx.fillStyle = "#0095DD";
+    ctx.fill();
+    ctx.closePath();
+}
+
+// 繪製分數和生命
+function drawScore() {
+    ctx.font = "16px Arial";
+    ctx.fillStyle = "#0095DD";
+    ctx.fillText("分數: " + score, 8, 20);
+    ctx.fillText("生命: " + lives, canvas.width - 65, 20);
+
+    if (currentDifficulty === 'timeChallenge') {
+        ctx.fillText("剩餘時間: " + remainingTime.toFixed(1), canvas.width / 2 - 50, 20); // 保留一位小數
+    }
+}
+
+// 繪製遊戲結束提示
+function drawGameOver() {
+    ctx.fillStyle = "rgba(255, 0, 0, 0.5)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "24px Arial";
+    ctx.fillText("遊戲結束", canvas.width / 2 - 60, canvas.height / 2);
+    ctx.fillText("點擊重新開始", canvas.width / 2 - 80, canvas.height / 2 + 30);
+}
+
+// 繪製背景
+function drawBackground() {
+    if (currentBackground === 'gradient') {
+        let gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, "#ffcccc");
+        gradient.addColorStop(1, "#ccffff");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else if (currentBackground === 'solid') {
+        ctx.fillStyle = "#f0f0f0";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else if (currentBackground === 'image') {
+        const img = new Image();
+        img.src = '1.jpg'; // 在此替換為你的圖片URL
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    }
+}
+
+// 繪製球的尾跡
+function drawBallTrail(ball) {
+    const trailLength = 10; // 尾跡長度
+    const alphaStep = 1 / trailLength; // 每步的透明度變化
+    for (let i = 0; i < trailLength; i++) {
+        ctx.beginPath();
+        ctx.arc(ball.x - ball.dx * i, ball.y - ball.dy * i, ballRadius, 0, Math.PI * 2);
+        ctx.fillStyle =  `rgba(0, 149, 221, ${1 - (i * alphaStep)}) `; // 漸變透明度
+        ctx.fill();
+        ctx.closePath();
+    }
+}
+
+// 繪製球
+function drawBalls() {
+    balls.forEach(ball => {
+        drawBallTrail(ball); // 繪製尾跡
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#0095DD";
+        ctx.fill();
+        ctx.closePath();
+    });
+}
+
+// 繪製遊戲元素
+function draw() {
+    drawBackground();
+    drawBricks();
+    drawBalls();
+    drawPaddle();
+    drawScore();
+    drawExplosions(); // 繪製爆炸效果
+
+    // 處理跳躍
+    if (isJumping) {
+        const elapsedTime = Date.now() - jumpStartTime; // 計算已過的時間
+        if (elapsedTime < jumpDuration) {
+            // 計算擋板的跳躍位置
+            const jumpProgress = elapsedTime / jumpDuration; // 計算進度（0到1）
+            paddleY = canvas.height - paddleHeight - (jumpHeight * Math.sin(jumpProgress * Math.PI)); // 擋板的位置
+        } else {
+            isJumping = false; // 跳躍結束
+        }
+    } else {
+        paddleY = canvas.height - paddleHeight; // 回到正常位置
+    }
+
+    if (gameOver) {
+        drawGameOver();
+        return;
+    }
+
+    balls.forEach(ball => {
+        // 更新球的座標
+        ball.x += ball.dx;
+        ball.y += ball.dy;
+
+        // 碰到邊界反彈
+        if (ball.x + ball.dx > canvas.width - ballRadius || ball.x + ball.dx < ballRadius) {
+            ball.dx = -ball.dx;
+        }
+        if (ball.y + ball.dy < ballRadius) {
+            ball.dy = -ball.dy;
+        } else if (ball.y + ball.dy > canvas.height - ballRadius) {
+            // 碰到擋板
+            if (ball.x > paddleX && ball.x < paddleX + paddleWidth) {
+                ball.dy = -ball.dy;
+            } else {
+                lives--;
+                if (!lives) {
+                    gameOver = true;
+                } else {
+                    resetBall(ball);
+                }
+            }
+        }
+        
+        // 碰到磚塊
+        for (let c = 0; c < brickColumnCount; c++) {
+            for (let r = 0; r < brickRowCount; r++) {
+                const b = bricks[c][r];
+                if (b.status == 1) {
+                    if (ball.x > b.x && ball.x < b.x + brickWidth && ball.y > b.y && ball.y < b.y + brickHeight) {
+                        ball.dy = -ball.dy;
+                        b.hitCount--; // 減少擊打次數
+                        if (b.hitCount <= 0) {
+                            b.status = 0; // 磚塊被打破
+                            score++;
+                            // 創建爆炸效果
+                        createExplosion(b.x + brickWidth / 2, b.y + brickHeight / 2);
+                            // 控制跳躍效果
+                            if (isJumping) {
+                                const currentTime = Date.now();
+                                const elapsed = currentTime - jumpStartTime;
+                                if (elapsed < jumpDuration) {
+                                    const jumpProgress = elapsed / jumpDuration;
+                                    const jumpOffset = jumpHeight * Math.sin(jumpProgress * Math.PI);
+                                    paddleX += jumpOffset * jumpDirection; // 擋板隨著跳躍移動
+                                } else {
+                                    isJumping = false; // 跳躍結束
+                                }
+                            }
+
+                            // 处理连击
+                            const currentTime = Date.now();
+                            if (currentTime - lastBreakTime <= comboTimeLimit) {
+                                comboCount++; // 增加连击计数
+                            } else {
+                                comboCount = 1; // 重置连击计数
+                            }
+                            lastBreakTime = currentTime; // 更新最后击破时间
+
+                            // 根据连击次数加分
+                            score += comboCount; // 额外分数为连击次数
+
+
+                            // 獎勵機制：隨機延長時間或增加生命
+                            if (score % 5 === 0) { // 每 5 分獎勵一次
+                                if (Math.random() < 0.5) { // 50% 機率
+                                    remainingTime += 5; // 增加 5 秒
+                                } else {
+                                    lives++; // 增加一條生命
+                                }
+                            }
+
+                            // 多球模式：每5分獲得一顆額外的球
+                            if (score % 10 === 0) {
+                                const newBall = {
+                                    x: canvas.width / 2,
+                                    y: canvas.height - 30,
+                                    dx: difficultySettings[currentDifficulty].ballSpeedX,
+                                    dy: difficultySettings[currentDifficulty].ballSpeedY
+                                };
+                                balls.push(newBall);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    
+
+    // 時間挑戰模式
+    if (currentDifficulty === 'timeChallenge') {
+        remainingTime -= 0.016; // 每幀減少時間，假設60FPS
+        if (remainingTime <= 0) {
+            gameOver = true; // 時間到遊戲結束
+        }
+    }
+
+    requestAnimationFrame(draw);
+}
+
+// 重置球的位置和速度
+function resetBall(ball) {
+    ball.x = canvas.width / 2;
+    ball.y = canvas.height - 30;
+    ball.dx = difficultySettings[currentDifficulty].ballSpeedX;
+    ball.dy = difficultySettings[currentDifficulty].ballSpeedY;
+    paddleX = (canvas.width - paddleWidth) / 2;
+}
+
+
+// 開始遊戲
+initializeGame();
+</script>
+</body>
+</html>
